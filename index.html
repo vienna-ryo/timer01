@@ -1,0 +1,462 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="時計タイマー">
+<meta name="theme-color" content="#0c0f13">
+<title>横画面 時計＆タイマー</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Noto+Sans+JP:wght@400;500;700&display=swap">
+<style>
+/* Layout: iPhone横画面専用。数字は画面幅いっぱいに自動フィット、操作バーは上下に重ねて表示（触らないと消える） */
+:root{
+  --bg:#0c0f13;
+  --panel:#161a20;
+  --line:#262c35;
+  --fg:#ece6da;
+  --muted:#7b8390;
+  --accent:#f0a23a;
+  --alert:#ff5b4f;
+  --f-num:"Barlow Condensed","Roboto Condensed","Arial Narrow",sans-serif;
+  --f-ui:"Noto Sans JP","Hiragino Sans","Yu Gothic",system-ui,sans-serif;
+  --side-l:max(16px,env(safe-area-inset-left,0px));
+  --side-r:max(16px,env(safe-area-inset-right,0px));
+  color-scheme:dark;
+}
+:root.light{
+  --bg:#f3f5f8;
+  --panel:#ffffff;
+  --line:#d3d8e0;
+  --fg:#12161c;
+  --muted:#5f6773;
+  --accent:#c97408;
+  --alert:#d9302a;
+  color-scheme:light;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html{height:100%;background:var(--bg);touch-action:manipulation;-webkit-text-size-adjust:100%}
+body{
+  height:100%;margin:0;position:relative;overflow:hidden;
+  padding-left:var(--side-l);padding-right:var(--side-r);
+  padding-block:0;
+  background:var(--bg);color:var(--fg);
+  font-family:var(--f-ui);
+  -webkit-user-select:none;user-select:none;
+  -webkit-touch-callout:none;
+  touch-action:manipulation;
+  -webkit-tap-highlight-color:transparent;
+}
+body.idle{cursor:none}
+
+/* ---- 中央（画面全体） ---- */
+.stage{
+  position:absolute;inset:0;
+  display:grid;place-items:center;
+  padding-left:var(--side-l);padding-right:var(--side-r);
+  padding-top:env(safe-area-inset-top,0px);
+  padding-bottom:env(safe-area-inset-bottom,0px);
+}
+.view{display:flex;flex-direction:column;align-items:center;gap:6px;min-width:0}
+.num{
+  font-family:var(--f-num);font-weight:700;
+  font-variant-numeric:tabular-nums;
+  font-size:100px;line-height:.8;white-space:nowrap;
+  color:var(--fg);
+}
+.num .c{color:var(--accent);position:relative;top:-.05em;margin:0 .01em}
+.date{
+  font-size:clamp(14px,5vh,26px);font-weight:700;letter-spacing:.08em;color:var(--muted);
+  font-variant-numeric:tabular-nums;white-space:nowrap;
+}
+.status{font-size:clamp(13px,4.5vh,22px);font-weight:700;letter-spacing:.12em;color:var(--muted);white-space:nowrap}
+body.running .status{display:none}
+#timerNum .end{display:inline-block;font-family:var(--f-ui);font-weight:700;line-height:1.05;letter-spacing:.04em}
+.prog{align-self:stretch;height:4px;background:var(--line);border-radius:2px;overflow:hidden}
+.prog i{display:block;height:100%;width:100%;background:var(--accent);transform-origin:left;transition:transform .25s linear}
+.presets{display:flex;flex-wrap:wrap;justify-content:center;gap:8px;padding-top:4px}
+body.running .presets{display:none}
+.chip{
+  all:unset;cursor:pointer;
+  padding:6px 14px;border-radius:999px;
+  border:1px solid var(--line);color:var(--fg);
+  font-size:14px;font-weight:500;white-space:nowrap;
+}
+.chip[aria-pressed="true"]{border-color:var(--accent);color:var(--accent)}
+body.ringing #timerNum{color:var(--alert)}
+body.ringing .prog i{background:var(--alert)}
+@media (prefers-reduced-motion:no-preference){
+  body.ringing #timerNum{animation:flash 1s steps(2,jump-none) infinite}
+}
+@keyframes flash{50%{opacity:.25}}
+.hint{
+  display:none;margin:8px 0 0;
+  font-size:13px;color:var(--muted);text-align:center;
+  word-break:auto-phrase;text-wrap:balance;
+}
+@media (orientation:portrait){ .hint{display:block} }
+
+/* ---- 上下の操作バー（数字の上に重ねる） ---- */
+.bar,.ctrl{
+  position:absolute;left:0;right:0;z-index:2;
+  padding-left:var(--side-l);padding-right:var(--side-r);
+  transition:opacity .4s ease;
+}
+.bar{
+  top:0;
+  padding-top:calc(6px + env(safe-area-inset-top,0px));
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+}
+.ctrl{
+  bottom:0;
+  padding-bottom:calc(6px + env(safe-area-inset-bottom,0px));
+  display:flex;justify-content:center;align-items:center;flex-wrap:wrap;gap:8px;
+}
+body.idle .bar,body.idle .ctrl{opacity:0;pointer-events:none}
+.seg{
+  display:inline-flex;padding:3px;
+  background:var(--panel);border:1px solid var(--line);border-radius:999px;
+}
+.seg button{
+  all:unset;cursor:pointer;
+  padding:7px 18px;border-radius:999px;
+  font-size:15px;font-weight:700;color:var(--muted);
+  white-space:nowrap;
+}
+.seg button[aria-pressed="true"]{background:var(--fg);color:var(--bg)}
+.seg button:focus-visible,.btn:focus-visible,.chip:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.mini{
+  font-family:var(--f-num);font-size:22px;font-weight:700;
+  font-variant-numeric:tabular-nums;color:var(--accent);
+  white-space:nowrap;
+}
+.right{display:flex;align-items:center;gap:8px}
+.mini small{font-family:var(--f-ui);font-size:12px;color:var(--muted);margin-right:6px;letter-spacing:.06em}
+.btn{
+  all:unset;cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+  padding:8px 14px;border-radius:12px;
+  background:var(--panel);border:1px solid var(--line);
+  font-size:15px;font-weight:500;color:var(--fg);white-space:nowrap;
+  font-variant-numeric:tabular-nums;
+}
+.btn:active{transform:translateY(1px)}
+.btn.primary{
+  min-width:7.5em;padding:8px 26px;
+  background:var(--accent);border-color:var(--accent);
+  color:var(--bg);font-weight:700;
+}
+body.ringing .btn.primary{background:var(--alert);border-color:var(--alert)}
+.btn.ghost{background:var(--bg)}
+</style>
+
+</head>
+<body>
+<main class="stage" id="stage">
+  <section class="view" id="clockView">
+    <div class="num" id="clockNum">12<span class="c">:</span>00<span class="c">:</span>00</div>
+    <div class="date" id="clockDate">2026年10月31日（土）</div>
+    <p class="hint">スマホを横向きにすると、<wbr>画面いっぱいに表示されます</p>
+  </section>
+
+  <section class="view" id="timerView" hidden>
+    <div class="status" id="status">セット</div>
+    <div class="num" id="timerNum">05<span class="c">:</span>00</div>
+    <div class="prog" aria-hidden="true"><i id="progBar"></i></div>
+    <div class="presets" id="presets"></div>
+  </section>
+</main>
+
+<header class="bar" id="bar">
+  <div class="seg" role="group" aria-label="表示切り替え">
+    <button id="tabClock" type="button" aria-pressed="true">時計</button>
+    <button id="tabTimer" type="button" aria-pressed="false">タイマー</button>
+  </div>
+  <span class="mini" id="mini" hidden><small>タイマー</small><span id="miniVal">05:00</span></span>
+  <div class="right">
+    <div class="seg" role="group" aria-label="画面の明るさ">
+      <button id="thDark" type="button" aria-pressed="true">ダーク</button>
+      <button id="thLight" type="button" aria-pressed="false">ライト</button>
+    </div>
+    <button class="btn ghost" id="fsBtn" type="button">全画面</button>
+  </div>
+</header>
+
+<footer class="ctrl" id="ctrl" hidden>
+  <button class="btn" type="button" data-adj="-60000" id="m60">−1分</button>
+  <button class="btn" type="button" data-adj="-10000" id="m10">−10秒</button>
+  <button class="btn primary" type="button" id="mainBtn">スタート</button>
+  <button class="btn" type="button" data-adj="10000" id="p10">＋10秒</button>
+  <button class="btn" type="button" data-adj="60000" id="p60">＋1分</button>
+  <button class="btn ghost" type="button" id="resetBtn">リセット</button>
+</footer>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const body = document.body;
+  const store = {
+    get(k,d){ try{ const v = localStorage.getItem(k); return v===null ? d : JSON.parse(v); }catch(e){ return d; } },
+    set(k,v){ try{ localStorage.setItem(k, JSON.stringify(v)); }catch(e){} }
+  };
+  const pad = n => String(n).padStart(2,'0');
+  const colon = '<span class="c">:</span>';
+  const WEEK = ['日','月','火','水','木','金','土'];
+  const MAX = 99*3600*1000;
+
+  /* ---------- ピンチ拡大・ダブルタップ拡大を無効化（iPhone Safari） ---------- */
+  ['gesturestart','gesturechange','gestureend'].forEach(t=>{
+    document.addEventListener(t, e=>e.preventDefault(), {passive:false});
+  });
+  document.addEventListener('touchmove', e=>{ if(e.touches.length>1) e.preventDefault(); }, {passive:false});
+
+  /* ---------- 状態 ---------- */
+  let mode = store.get('mode','clock');
+  let setMs = store.get('setMs', 5*60*1000);
+  let state = 'idle';              // idle | running | paused | done
+  let remain = setMs, total = setMs, endAt = 0, doneAt = 0;
+
+  /* ---------- 数字を画面いっぱいに合わせる ---------- */
+  let fitKey = '';
+  function fit(){
+    const clock = mode==='clock';
+    const view = clock ? $('clockView') : $('timerView');
+    const num  = clock ? $('clockNum')  : $('timerNum');
+    const st = $('stage'), cs = getComputedStyle(st);
+    const W = st.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+    let H = st.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+    // タイマー設定中は上下の操作バー分をあける
+    if(!clock && !body.classList.contains('running')){
+      H -= ($('bar').offsetHeight + $('ctrl').offsetHeight + 8);
+    }
+    const gap = parseFloat(getComputedStyle(view).rowGap) || 0;
+    let other = 0;
+    for(const c of view.children){
+      if(c===num || getComputedStyle(c).display==='none') continue;
+      other += c.offsetHeight + gap;
+    }
+    num.style.fontSize = '100px';
+    const w = num.scrollWidth, h = num.offsetHeight;
+    if(!w || !h) return;
+    const size = Math.floor(Math.min((W*0.98)/w, (H-other)/h) * 100);
+    num.style.fontSize = Math.max(24, size) + 'px';
+  }
+  function refit(force){
+    const key = [mode, state, $('timerNum').classList.contains('long'), innerWidth, innerHeight].join('|');
+    if(force || key!==fitKey){ fitKey = key; fit(); }
+  }
+
+  /* ---------- 時計 ---------- */
+  function renderClock(now){
+    $('clockNum').innerHTML = pad(now.getHours()) + colon + pad(now.getMinutes()) + colon + pad(now.getSeconds());
+    $('clockDate').textContent =
+      now.getFullYear()+'年'+(now.getMonth()+1)+'月'+now.getDate()+'日（'+WEEK[now.getDay()]+'）';
+  }
+
+  /* ---------- タイマー ---------- */
+  function fmt(sec){
+    const h = Math.floor(sec/3600), m = Math.floor(sec%3600/60), s = sec%60;
+    return h>0 ? { html: h+colon+pad(m)+colon+pad(s), long:true,  text:h+':'+pad(m)+':'+pad(s) }
+               : { html: pad(m)+colon+pad(s),         long:false, text:pad(m)+':'+pad(s) };
+  }
+  function currentRemain(){
+    return state==='running' ? Math.max(0, endAt - Date.now()) : remain;
+  }
+  function renderTimer(){
+    const el = $('timerNum');
+    let f;
+    if(state==='done'){
+      f = { long:false, text:'おわり' };
+      if(!el.querySelector('.end')) el.innerHTML = '<span class="end">おわり</span>';
+      $('progBar').style.transform = 'scaleX(1)';
+    }else{
+      const r = currentRemain();
+      f = fmt(Math.ceil(r/1000));
+      el.innerHTML = f.html;
+      $('progBar').style.transform = 'scaleX('+(total>0 ? Math.min(1,r/total) : 0)+')';
+    }
+    el.classList.toggle('long', f.long);
+    $('miniVal').textContent = f.text;
+    $('status').textContent =
+      {idle:'セット',running:'残り',paused:'一時停止中',done:'時間です'}[state];
+    $('mainBtn').textContent =
+      {idle:'スタート',running:'一時停止',paused:'再開',done:'止める'}[state];
+    body.classList.toggle('running', state==='running' || state==='done');
+    body.classList.toggle('ringing', state==='done');
+    $('mini').hidden = !(mode==='clock' && state!=='idle');
+    document.querySelectorAll('.chip').forEach(c=>{
+      c.setAttribute('aria-pressed', String(state==='idle' && +c.dataset.ms===setMs));
+    });
+    refit(false);
+  }
+
+  function start(){
+    ensureAudio();
+    if(state==='done'){ stopRing(); state='idle'; remain=setMs; total=setMs; }
+    else if(state==='running'){ remain = Math.max(0,endAt-Date.now()); state='paused'; }
+    else if(remain>0){ endAt = Date.now()+remain; state='running'; }
+    renderTimer(); poke();
+  }
+  function reset(){
+    stopRing(); state='idle'; remain=setMs; total=setMs; renderTimer(); poke();
+  }
+  function adjust(d){
+    if(state==='done') return;
+    if(state==='running'){
+      const r = Math.min(MAX, Math.max(0, endAt-Date.now()+d));
+      endAt = Date.now()+r; total = Math.max(r, total+d);
+    }else{
+      remain = Math.min(MAX, Math.max(0, remain+d));
+      if(state==='idle'){ setMs = remain; total = remain; store.set('setMs',setMs); }
+      else total = Math.max(remain, total+d);
+    }
+    renderTimer();
+  }
+  function setPreset(ms){
+    stopRing(); state='idle'; setMs=ms; remain=ms; total=ms; store.set('setMs',ms); renderTimer();
+  }
+
+  /* プリセット */
+  [[30,'30秒'],[60,'1分'],[180,'3分'],[300,'5分'],[600,'10分'],[900,'15分'],[1800,'30分'],[3600,'1時間']].forEach(([sec,label])=>{
+    const b = document.createElement('button');
+    b.type='button'; b.className='chip'; b.id='preset'+sec;
+    b.dataset.ms = String(sec*1000);
+    b.textContent = label;
+    b.addEventListener('click', ()=>setPreset(sec*1000));
+    $('presets').appendChild(b);
+  });
+
+  /* ---------- アラーム音 ---------- */
+  let ac = null, ringIv = null, ringStop = null;
+  function ensureAudio(){
+    try{
+      if(!ac) ac = new (window.AudioContext||window.webkitAudioContext)();
+      if(ac.state==='suspended') ac.resume();
+    }catch(e){}
+  }
+  function beep(){
+    if(!ac) return;
+    const t = ac.currentTime;
+    [0,.2,.4].forEach(d=>{
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.type='sine'; o.frequency.value = 880;
+      g.gain.setValueAtTime(.0001,t+d);
+      g.gain.exponentialRampToValueAtTime(.35,t+d+.015);
+      g.gain.exponentialRampToValueAtTime(.0001,t+d+.15);
+      o.connect(g); g.connect(ac.destination);
+      o.start(t+d); o.stop(t+d+.16);
+    });
+    try{ navigator.vibrate && navigator.vibrate([150,80,150]); }catch(e){}
+  }
+  function startRing(){
+    beep();
+    ringIv = setInterval(beep, 1500);
+    ringStop = setTimeout(()=>{ clearInterval(ringIv); ringIv=null; }, 60000);
+  }
+  function stopRing(){
+    clearInterval(ringIv); clearTimeout(ringStop); ringIv=null; ringStop=null;
+  }
+
+  /* ---------- ダーク／ライト ---------- */
+  function setTheme(t){
+    const light = t==='light';
+    store.set('theme', light ? 'light' : 'dark');
+    document.documentElement.classList.toggle('light', light);
+    $('thDark').setAttribute('aria-pressed', String(!light));
+    $('thLight').setAttribute('aria-pressed', String(light));
+    const m = document.querySelector('meta[name="theme-color"]');
+    if(m) m.setAttribute('content', light ? '#f3f5f8' : '#0c0f13');
+    poke();
+  }
+  $('thDark').addEventListener('click', ()=>setTheme('dark'));
+  $('thLight').addEventListener('click', ()=>setTheme('light'));
+
+  /* ---------- モード切り替え（ボタンのみ） ---------- */
+  function setMode(m){
+    mode = m; store.set('mode',m);
+    $('clockView').hidden = m!=='clock';
+    $('timerView').hidden = m!=='timer';
+    $('ctrl').hidden = m!=='timer';
+    $('tabClock').setAttribute('aria-pressed', String(m==='clock'));
+    $('tabTimer').setAttribute('aria-pressed', String(m==='timer'));
+    renderClock(new Date());
+    renderTimer(); refit(true); poke();
+  }
+  $('tabClock').addEventListener('click', ()=>setMode('clock'));
+  $('tabTimer').addEventListener('click', ()=>setMode('timer'));
+
+  /* ---------- ボタン ---------- */
+  $('mainBtn').addEventListener('click', start);
+  $('resetBtn').addEventListener('click', reset);
+  document.querySelectorAll('[data-adj]').forEach(b=>{
+    b.addEventListener('click', ()=>adjust(+b.dataset.adj));
+  });
+  document.addEventListener('keydown', e=>{
+    if(e.key===' ' && mode==='timer'){ e.preventDefault(); start(); }
+    else if(e.key==='c') setMode('clock');
+    else if(e.key==='t') setMode('timer');
+    poke();
+  });
+
+  /* ---------- 全画面（対応端末のみ）・スリープ防止 ---------- */
+  const fsOK = !!(document.fullscreenEnabled || document.webkitFullscreenEnabled);
+  if(!fsOK) $('fsBtn').hidden = true;
+  $('fsBtn').addEventListener('click', ()=>{
+    const d = document, el = d.documentElement;
+    try{
+      if(d.fullscreenElement || d.webkitFullscreenElement) (d.exitFullscreen || d.webkitExitFullscreen).call(d);
+      else { const p = (el.requestFullscreen || el.webkitRequestFullscreen).call(el); if(p && p.catch) p.catch(()=>{}); }
+    }catch(e){}
+  });
+  const fsLabel = ()=>{ $('fsBtn').textContent = (document.fullscreenElement||document.webkitFullscreenElement) ? '全画面を終了' : '全画面'; };
+  document.addEventListener('fullscreenchange', fsLabel);
+  document.addEventListener('webkitfullscreenchange', fsLabel);
+
+  let lock = null;
+  async function keepAwake(){
+    try{ if('wakeLock' in navigator && !lock){ lock = await navigator.wakeLock.request('screen'); lock.addEventListener('release',()=>{ lock=null; }); } }catch(e){}
+  }
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState==='visible') keepAwake(); });
+
+  /* ---------- 操作バーの自動非表示 ---------- */
+  let idleT = null;
+  function poke(){
+    body.classList.remove('idle');
+    clearTimeout(idleT);
+    idleT = setTimeout(()=>{
+      if(mode==='clock' || state==='running') body.classList.add('idle');
+    }, 4000);
+  }
+  document.addEventListener('pointerdown', ()=>{ poke(); keepAwake(); ensureAudio(); });
+  document.addEventListener('pointermove', e=>{ if(e.pointerType==='mouse') poke(); });
+
+  /* ---------- 画面サイズ変更・回転 ---------- */
+  addEventListener('resize', ()=>refit(true));
+  addEventListener('orientationchange', ()=>setTimeout(()=>refit(true), 300));
+  if(document.fonts && document.fonts.ready) document.fonts.ready.then(()=>refit(true));
+
+  /* ---------- ループ ---------- */
+  function tick(){
+    if(state==='running' && Date.now()>=endAt){
+      state='done'; doneAt=endAt; remain=0;
+      if(mode!=='timer') setMode('timer');
+      startRing();
+    }
+    renderClock(new Date());
+    renderTimer();
+  }
+  setTheme(store.get('theme','dark'));
+  setMode(mode === 'timer' ? 'timer' : 'clock');
+  tick();
+  setInterval(tick, 200);
+  keepAwake();
+})();
+</script>
+
+</body>
+</html>
